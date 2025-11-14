@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["src/*"],
+      "@db/*": ["src/db/*"],
+      "@dao/*": ["src/dao/*"],
+      "@sdk/*": ["src/sdk/*"],
+      "@queue/*": ["src/queue/*"],
+      "@utils/*": ["src/utils/*"],
+      "@router/*": ["src/router/*"],
+      "@config/*": ["src/config/*"],
+      "@script/*": ["src/script/*"],
+      "@service/*": ["src/service/*"],
+      "@constant/*": ["src/constant/*"],
+      "@middleware/*": ["src/middleware/*"],
+      "@controller/*": ["src/controller/*"],
+      "@errorhandler/*": ["src/errorhandler/*"]
+    }
+  },
+  "include": ["src/**/*"]
+}

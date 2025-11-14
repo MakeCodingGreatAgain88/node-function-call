@@ -1,0 +1,50 @@
+{
+  "name": "node-function-call",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "nodemon src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "sand",
+  "license": "ISC",
+  "description": "nodejs 函数示例",
+  "dependencies": {
+    "@alicloud/sms-sdk": "^1.1.6",
+    "ali-oss": "^6.23.0",
+    "axios": "^1.12.2",
+    "dotenv": "^17.2.3",
+    "ioredis": "^5.8.2",
+    "koa": "^3.0.1",
+    "koa-body": "^6.0.1",
+    "koa-mount": "^4.2.0",
+    "koa-router": "^14.0.0",
+    "koa-static": "^5.0.0",
+    "koa2-cors": "^2.0.6",
+    "module-alias": "^2.2.3",
+    "mysql2": "^3.15.3",
+    "qs": "^6.14.0",
+    "sequelize": "^6.37.7",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  },
+  "_moduleAliases": {
+    "@": "src",
+    "@db": "src/db",
+    "@dao": "src/dao",
+    "@sdk": "src/sdk",
+    "@queue": "src/queue",
+    "@utils": "src/utils",
+    "@router": "src/router",
+    "@config": "src/config",
+    "@script": "src/script",
+    "@service": "src/service",
+    "@constant": "src/constant",
+    "@middleware": "src/middleware",
+    "@controller": "src/controller",
+    "@errorhandler": "src/errorhandler"
+  }
+}
