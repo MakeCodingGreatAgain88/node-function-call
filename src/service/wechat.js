@@ -10,6 +10,7 @@ const crypto = require('crypto')
 const path = require('path')
 const axios = require('axios')
 const {generateOrderNo} = require('@utils/order')
+const {createWechatSign} = require('@utils/wechatSign')
 const {PAY_EXPIRE_TIME} = require('@config/env.config')
 const {
     OrderStatus,
@@ -201,64 +202,29 @@ class WechatService {
                 const method = "POST"
                 const urlPath = "/v3/pay/transactions/jsapi"
 
-                /**
-                 * 构建签名：
-                 * 何时需要构建签名：https://pay.weixin.qq.com/doc/v3/merchant/4012365342#%E8%AF%B7%E6%B1%82%E6%8E%A5%E5%8F%A3%E5%90%8E%E7%AB%AF%E7%AD%BE%E5%90%8D
-                 * 计算签名：https://pay.weixin.qq.com/doc/v3/merchant/4012365336
-                 * start ____________________________________________________________________________________________________________________________________________________________*/
-
-                // 商户私钥
-                const privateKeyPath = path.join(process.cwd(), `src/certs/apiclient_test_key.pem`)
-                const privateKey = fs.readFileSync(privateKeyPath, 'utf8')
-
-                // appid
-                const appid = params.appid
-
-                // 商户号
-                const mchid = params.mchid
-
-                // 证书序列号
-                const serial_no = params.serial_no
-
-                // 随机串
-                const nonceStr = crypto.randomBytes(16).toString('hex')
-
-                // 时间戳
-                const timeStamp = Math.floor(Date.now() / 1000)
-
-                // 请求报文主体
-                const bodyParams = params.bodyParams
-
-                // 请求报文主体（注意：需要按字典序排序的 JSON 字符串）
-                const body_params_str = JSON.stringify(bodyParams)
-
-                // 构造签名串（注意：末尾的换行符很重要）
-                const signStr = `${ method }\n${ urlPath }\n${ timeStamp }\n${ nonceStr }\n${ body_params_str }\n`
-
-                // 生成预支付ID签名
-                const sign = crypto.createSign('RSA-SHA256')
-                sign.update(signStr)
-                sign.end()
-                const signature = sign.sign(privateKey, 'base64')
-
-                // 请求头传递签名
-                const Authorization = `WECHATPAY2-SHA256-RSA2048 `
-                    + `mchid="${ mchid }",`
-                    + `nonce_str="${ nonceStr }",`
-                    + `timestamp="${ timeStamp }",`
-                    + `signature="${ signature }",`
-                    + `serial_no="${ serial_no }"`
+                // 构建签名
+                const {
+                    Authorization,
+                    timeStamp,
+                    nonceStr
+                } = createWechatSign({
+                    method,
+                    urlPath,
+                    mchid: '微信支付商户号 - 微信支付平台获取',
+                    serial_no: '证书序列号 - 微信支付平台获取',
+                    bodyParams: params.bodyParams
+                })
 
                 /**
-                 * 构建签名：
+                 * ：
                  * end ____________________________________________________________________________________________________________________________________________________________*/
 
-                // 接口请求得到预支付ID: prepay_id
-                // 预支付交易会话标识，JSAPI或小程序调起支付时需要使用的参数，有效期为2小时，失效后需要重新请求该接口以获取新的prepay_id。
+                    // 接口请求得到预支付ID: prepay_id
+                    // 预支付交易会话标识，JSAPI或小程序调起支付时需要使用的参数，有效期为2小时，失效后需要重新请求该接口以获取新的prepay_id。
                 const result = await axios({
                         url: "https://api.mch.weixin.qq.com/v3/pay/transactions/jsapi",
                         method,
-                        data: bodyParams,
+                        data: params.bodyParams,
                         headers: {
                             "Content-Type": "application/json",
                             "Accept": "application/json",
@@ -271,7 +237,7 @@ class WechatService {
                 const prepay_id = result.data.prepay_id
 
                 // 生成支付签名（用于客户端调起支付）
-                const paySignStr = `${ appid }\n${ timeStamp }\n${ nonceStr }\nprepay_id=${ prepay_id }\n`
+                const paySignStr = `${ '小程序appid - 小程序后台获取' }\n${ timeStamp }\n${ nonceStr }\nprepay_id=${ prepay_id }\n`
 
                 // 使用商户API证书私钥对待签名串进行SHA256 with RSA签名
                 const paySign = crypto.createSign('RSA-SHA256')
@@ -318,9 +284,93 @@ class WechatService {
         })
     }
 
-    closeOrder() {
+    /**
+     * 关闭订单（调用微信支付关闭接口并更新订单状态，针对未支付订单）
+     * @param {Object} orderId - 订单id
+     * @returns {Promise<Object>} 关闭结果
+     */
+    async closeOrder(orderId) {
+        return new Promise(async (resolve, reject) => {
+            try {
 
+                // todo 查询订单
+                const order = await OrderDao.getByIdForAutoCancel(orderId)
+
+                if (!order) {
+                    console.log(`[订单自动关闭] 订单 ${ orderId } 不存在`)
+                    resolve({
+                        success: false,
+                        message: '订单不存在'
+                    })
+                    return
+                }
+
+                // 检查订单状态：只有待支付且未支付的订单才需要关闭
+                if (order.orderStatus === OrderStatus.PENDING_PAYMENT && order.payStatus === PayStatus.UNPAID) {
+                    const method = "POST"
+                    const urlPath = `/v3/pay/transactions/out-trade-no/${ order.orderNo }/close`
+
+                    const bodyParams = {
+                        mchid: '微信支付商户号 - 微信支付平台获取'
+                    }
+
+                    // 构建签名
+                    const {
+                        Authorization
+                    } = createWechatSign({
+                        method,
+                        urlPath,
+                        mchid: '微信支付商户号 - 微信支付平台获取',
+                        serial_no: '证书序列号 - 微信支付平台获取',
+                        bodyParams
+                    })
+
+                    // 调用微信支付关闭订单接口
+                    const result = await axios({
+                        url: `https://api.mch.weixin.qq.com${ urlPath }`,
+                        method,
+                        data: bodyParams,
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                            "Authorization": Authorization,
+                            "User-Agent": "WechatPay-APIv3-NodeJS"
+                        },
+                        timeout: 10000 // 超时时间（单位：毫秒）
+                    })
+
+                    console.log(`[关闭订单] 订单 ${ order.orderNo } 关闭成功`)
+
+                    // todo 更新订单状态和支付状态
+                    await OrderDao.updateByIdForAutoCancel(order.id, {
+                        orderStatus: OrderStatus.CANCELLED,
+                        payStatus: PayStatus.PAYMENT_FAILED // 关闭订单时，支付状态设为支付失败
+                    })
+
+                    console.log(`[关闭微信订单] 订单 ${ order.orderNo } 已成功关闭`)
+                }
+                else {
+                    console.log(`[订单自动关闭] 订单 ${ order.orderNo } (ID: ${ orderId }) 状态为 ${ order.orderStatus }，支付状态为 ${ order.payStatus }，无需处理`)
+                    resolve({
+                        success: false,
+                        message: '订单状态不符合关闭条件',
+                        orderStatus: order.orderStatus,
+                        payStatus: order.payStatus
+                    })
+                }
+                resolve({
+                    code: 200,
+                    data: null,
+                    message: '订单关闭成功'
+                })
+            }
+            catch (error) {
+                console.error(`[关闭微信订单] 订单 ${ order.orderNo } 关闭失败:`, error)
+                reject(error)
+            }
+        })
     }
+
 }
 
 module.exports = new WechatService()

@@ -90,11 +90,6 @@ class WechatController {
         try {
             const params = ctx.validated || {}
 
-            const wechatPayConfig = {
-                wechatAppId: '小程序appid - 小程序后台获取',
-                wechatMerchantId: '微信支付商户号 - 微信支付平台获取',
-                wechatPayCertNo: '证书序列号 - 微信支付平台获取'
-            }
             // 创建订单
             const order = await service.createOrder(params)
 
@@ -103,14 +98,11 @@ class WechatController {
             const payInfo = await service.createPrepayId({
                 userId: params.userId,
                 orderId: order.orderId,
-                appid: wechatPayConfig.wechatAppId,
-                mchid: wechatPayConfig.wechatMerchantId,
-                serial_no: wechatPayConfig.wechatPayCertNo,
                 bodyParams: {
                     // 公众号/小程序 id
-                    appid: wechatPayConfig.wechatAppId,
+                    appid: '小程序appid - 小程序后台获取',
                     // 商户号
-                    mchid: wechatPayConfig.wechatMerchantId,
+                    mchid: '微信支付商户号 - 微信支付平台获取',
                     // 商品描述
                     description: params.description,
                     // 商户订单号

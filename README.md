@@ -17,6 +17,8 @@
 - ✅ **获取微信 OpenID** - 通过微信小程序 code 获取用户的 openid 和 session_key
 - ✅ **获取接口调用凭证** - 获取微信接口调用的 access_token
 - ✅ **获取用户手机号** - 通过 code 和 access_token 获取用户手机号信息
+- ✅ **微信支付（JSAPI）** - 发起微信支付，适用于 H5 和小程序场景
+- ✅ **Redis 自动取消订单** - 基于 Bull 队列实现订单超时自动关闭功能
 
 ### 阿里云 OSS 相关
 - ✅ **获取临时 STS Token** - 获取阿里云 OSS 的临时访问凭证（STS Token）
@@ -40,6 +42,7 @@
 - **路径别名**: module-alias
 - **跨域**: koa2-cors
 - **静态文件**: koa-static
+- **队列任务**: bull (基于 Redis 的延迟任务队列)
 
 ## 快速开始
 
@@ -61,6 +64,12 @@ NODE_ENV=development
 # 微信相关配置（如使用微信示例）
 WX_APPID=your_wechat_appid
 WX_SECRET=your_wechat_secret
+PAY_EXPIRE_TIME=15
+
+# Redis 配置（用于订单自动取消队列）
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DB=0
 
 # 阿里云 OSS 相关配置（如使用 OSS 示例）
 ALI_OSS_REGION=your_oss_region
@@ -86,6 +95,12 @@ NODE_ENV=production
 # 微信相关配置（如使用微信示例）
 WX_APPID=your_wechat_appid
 WX_SECRET=your_wechat_secret
+PAY_EXPIRE_TIME=15
+
+# Redis 配置（用于订单自动取消队列）
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DB=0
 
 # 阿里云 OSS 相关配置（如使用 OSS 示例）
 ALI_OSS_REGION=your_oss_region
@@ -111,6 +126,12 @@ NODE_ENV=test
 # 微信相关配置（如使用微信示例）
 WX_APPID=your_wechat_appid
 WX_SECRET=your_wechat_secret
+PAY_EXPIRE_TIME=15
+
+# Redis 配置（用于订单自动取消队列）
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DB=0
 
 # 阿里云 OSS 相关配置（如使用 OSS 示例）
 ALI_OSS_REGION=your_oss_region
@@ -231,6 +252,116 @@ npm start
 **说明**: 
 - 此接口内部会自动获取 access_token，无需手动传递
 - code 需要通过微信小程序端的 `<button open-type="getPhoneNumber">` 获取
+
+#### 4. 发起微信支付（JSAPI）
+
+发起微信支付，适用于 H5 和小程序场景。创建订单后会自动添加 Redis 延迟任务，在支付过期时间到达时自动关闭订单。
+
+**接口地址**: `GET /wechat/jsapiPay`
+
+**请求参数** (query):
+- `userId` (number): 用户ID
+- `openid` (string): 微信用户 openid
+- `productId` (number): 商品ID
+- `productNum` (number): 商品数量
+- `totalPrice` (number): 订单总金额（单位：分，必须是整数）
+- `description` (string): 商品描述
+- `remark` (string, 可选): 订单备注
+
+**响应示例**:
+```json
+{
+  "code": 200,
+  "message": "订单创建成功",
+  "data": {
+    "prepay_id": "wx1234567890",
+    "package": "prepay_id=wx1234567890",
+    "timeStamp": "1234567890",
+    "nonceStr": "随机字符串",
+    "signType": "RSA",
+    "paySign": "签名"
+  }
+}
+```
+
+**功能特性**:
+- ✅ 自动创建订单并生成唯一订单号
+- ✅ 调用微信支付 API 创建预支付交易会话
+- ✅ 自动设置订单支付过期时间（默认 15 分钟，可通过环境变量配置）
+- ✅ **Redis 自动取消订单**：订单创建时自动添加延迟任务，超时未支付自动关闭订单
+- ✅ 支持订单重试机制（最多重试 3 次）
+
+**说明**: 
+- 订单创建后会返回预支付参数，前端使用这些参数调用微信支付 API
+- 支付过期时间到达后，系统会自动关闭订单（通过 Redis 队列实现）
+- 如果订单在过期前完成支付，需要手动取消延迟任务（调用 `closeOrderJob`）
+- 需要在微信支付平台配置回调通知地址（`notify_url`）用于接收支付结果
+
+### Redis 自动取消订单
+
+基于 **Bull** 队列实现的订单超时自动关闭功能。
+
+**工作原理**:
+1. 订单创建时，根据支付过期时间（默认 15 分钟）计算延迟时间
+2. 将关闭订单的任务添加到 Redis 队列中，设置延迟执行
+3. 延迟时间到达后，队列自动执行任务，调用 `closeOrder` 方法关闭订单
+4. 如果订单在过期前完成支付，可以调用 `closeOrderJob` 取消延迟任务
+
+**取消订单逻辑** (`closeOrder` 方法):
+
+取消订单时会执行以下流程：
+
+1. **订单状态检查**：
+   - 查询订单信息
+   - 仅当订单状态为 `待支付` 且支付状态为 `未支付` 时，才执行关闭操作
+   - 如果订单状态不符合条件，返回相应提示信息
+
+2. **调用微信支付关闭接口**：
+   - 调用微信支付 API：`POST /v3/pay/transactions/out-trade-no/{out_trade_no}/close`
+   - 使用商户私钥构建签名，确保请求安全性
+   - 请求超时时间：10 秒
+
+3. **更新订单状态**：
+   - 订单状态更新为 `已取消` (`CANCELLED`)
+   - 支付状态更新为 `支付失败` (`PAYMENT_FAILED`)
+
+4. **错误处理**：
+   - 如果订单不存在，返回相应提示
+   - 如果订单状态不符合关闭条件，返回当前订单状态信息
+   - 所有错误都会记录日志，便于排查问题
+
+**配置说明**:
+- 延迟时间：由环境变量 `PAY_EXPIRE_TIME` 控制（单位：分钟，默认 15 分钟）
+- 重试机制：最多重试 3 次，使用指数退避策略
+- Redis 配置：通过环境变量 `REDIS_HOST`、`REDIS_PORT`、`REDIS_DB` 配置
+
+**使用示例**:
+```javascript
+// 订单创建时自动添加延迟任务（在 createOrder 方法中）
+const orderCloseQueue = require('@queue/orderCloseQueue')
+await orderCloseQueue.add(
+    { orderId },
+    {
+        delay: expireMinutes * 60 * 1000, // 延迟时间
+        attempts: 3, // 最多重试3次
+        backoff: { type: 'exponential', delay: 2000 }
+    }
+)
+
+// 支付成功后取消延迟任务
+const { closeOrderJob } = require('@queue/orderCloseQueue')
+await closeOrderJob(orderId)
+
+// 手动调用关闭订单（如果需要手动取消订单）
+const wechatService = require('@service/wechat')
+await wechatService.closeOrder(orderId)
+```
+
+**注意事项**:
+- 只有 `待支付` 且 `未支付` 的订单才能被关闭
+- 关闭订单会同时调用微信支付接口关闭支付订单，确保数据一致性
+- 订单关闭后，用户将无法继续支付该订单
+- 建议在支付成功回调中调用 `closeOrderJob` 取消延迟任务，避免重复关闭
 
 ### 阿里云 OSS 相关接口
 
@@ -381,6 +512,8 @@ node-function-call/
 │   │   ├── ali-oss.js    # 阿里云 OSS 相关服务
 │   │   ├── ali-sms.js    # 阿里云 SMS 相关服务
 │   │   └── tencent-sts.js # 腾讯云 STS 相关服务
+│   ├── queue/            # 队列任务
+│   │   └── orderCloseQueue.js # 订单自动关闭队列
 │   ├── config/           # 配置文件
 │   │   ├── env.config.js # 环境变量配置
 │   │   └── tencent-sts.config.js # 腾讯云 STS 配置
