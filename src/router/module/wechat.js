@@ -15,13 +15,13 @@ const {
 const {
     getOpenId,
     getAccessToken,
-    getUserPhoneNumber
+    getUserPhoneNumber,
+    createJsapiPay
 } = require('@controller/wechat')
 
 const router = new Router({
     prefix: '/wechat'
 })
-
 
 /**
  * 获取openid
@@ -38,5 +38,9 @@ router.post('/getAccessToken', getAccessToken)
  */
 router.post('/getUserPhoneNumber', validate(verifyCodeSchema), getUserPhoneNumber)
 
+/**
+ * 发起支付（jsapi：适用h5,小程序）
+ */
+router.get('/jsapiPay', createJsapiPay)
 
 module.exports = router
